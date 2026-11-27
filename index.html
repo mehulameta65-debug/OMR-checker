@@ -47,6 +47,7 @@ $('app').innerHTML=`
  <div id="sum" style="margin:6px 0"></div>
  <canvas id="cv" style="width:100%;touch-action:manipulation;background:#ddd;border-radius:8px"></canvas>
  <div id="flags"></div>
+ <div id="review" style="margin-top:12px"></div>
  <button id="useKey" style="${BS};display:none">Use as answer key</button>
 </div>
 
@@ -65,7 +66,9 @@ function kinfo(){ const n=key.filter(Boolean).length;
  $('kinfo').textContent=n?`✅ Key ready: ${n}/100 answers`:'No key yet';
  $('kinfo').style.color=n?'#080':'#222';
  $('s2').style.opacity=n?1:.45;
- if(n&&!base)msg('Now upload a candidate OMR photo.'); }
+ if(n&&!base)msg('Now upload a candidate OMR photo.');
+ if(scan&&mode==='cand'){ show(); showFlags(); }
+}
 
 // ---- Step 1: PDF key ----
 $('pf').onchange=async e=>{ const f=e.target.files[0]; e.target.value=''; if(!f)return;
@@ -91,7 +94,7 @@ function load(f,m){ if(!f)return;
  mode=m; const im=new Image();
  im.onload=()=>{ const k=Math.min(1,1600/im.width); cv.width=Math.round(im.width*k); cv.height=Math.round(im.height*k);
   cx.drawImage(im,0,0,cv.width,cv.height); base=cx.getImageData(0,0,cv.width,cv.height);
-  pts=[]; scan=null; $('flags').innerHTML=''; $('sum').innerHTML=''; btns(); msg('Tap centre of '+LBL[0]+' (pinch-zoom for accuracy)'); };
+  pts=[]; scan=null; $('flags').innerHTML=''; $('review').innerHTML=''; $('sum').innerHTML=''; btns(); msg('Tap centre of '+LBL[0]+' (pinch-zoom for accuracy)'); };
  im.src=URL.createObjectURL(f); }
 
 function dot(p,c,r){ cx.beginPath(); cx.arc(p[0],p[1],r,0,7); cx.strokeStyle=c; cx.lineWidth=2; cx.stroke(); }
@@ -129,30 +132,76 @@ function run(){
    dot(f(COLS[b][o],v), fg&&fr[o]>=FAINT?'#f80':hit?'#0b0':'#aaa', hit||(fg&&fr[o]>=FAINT)?rad:3); }
  }
  scan={ans,flags,n:$('nm').value||('Candidate '+(results.length+1))};
- if(mode==='cand'){ scan.idx=results.push({n:scan.n,...sum()})-1; $('nm').value=''; }   // auto-add to list
+ if(mode==='cand'){ scan.idx=results.push({n:scan.n,...sum()})-1; $('nm').value=''; }
  btns(); show(); showFlags();
  msg(mode==='key'?'Fix any flags, then tap "Use as answer key".':'Done. Green rings should sit on filled bubbles.');
  $('sum').scrollIntoView({behavior:'smooth',block:'center'}); }
 
 function sum(){ const mc=+$('mc').value, mn=+$('mn').value; let c=0,w=0,u=0;
- scan.ans.forEach((a,i)=>{ if(!a)u++; else if(key[i]) a===key[i]?c++:w++; });   // blank = no marks
+ scan.ans.forEach((a,i)=>{ if(!a)u++; else if(key[i]) a===key[i]?c++:w++; });
  return {c,w,u,s:+(c*mc-w*mn).toFixed(2),f:scan.flags.filter(x=>!x.done).length}; }
+
 function show(){ const s=sum(), tot=100*(+$('mc').value);
  $('sum').innerHTML=mode==='key'?`Attempted ${100-s.u}`:
   `<div style="font-size:13px;color:#555">${scan.n}</div>
    <div><span style="font-size:36px;font-weight:800;color:#0a7">${s.s}</span> <span style="font-size:16px">/ ${tot}</span></div>
    <div>✔ ${s.c} correct · ✘ ${s.w} wrong · ${100-s.u} attempted · ${s.u} skipped${s.f?` · ⚠ ${s.f} to review below`:''}</div>`;
+ if(mode==='cand') showReview();
  if(scan.idx!==undefined){ Object.assign(results[scan.idx],s); renderRes(); } }
-function showFlags(){ $('flags').innerHTML=scan.flags.map(f=>`<div style="background:#fff;padding:8px;margin:4px 0;border-radius:8px;border:1px solid ${f.done?'#7c7':'#f80'}">Q${f.q+1} · ${f.why} · ${f.fr}<br>${['A','B','C','D','blank'].map((l,i)=>`<button onclick="fix(${f.q},${i})" style="${BS};padding:6px 10px">${l}</button>`).join('')}</div>`).join(''); }
-function fix(q,i){ scan.ans[q]=i<4?'ABCD'[i]:null; scan.flags.find(f=>f.q===q).done=true; showFlags(); show(); }
+
+function showReview(){
+ if(!scan||mode!=='cand'){ $('review').innerHTML=''; return; }
+ const rows=scan.ans.map((a,i)=>{
+  const k=key[i], flag=scan.flags.find(f=>f.q===i&&!f.done);
+  const state=flag?'Review':!a?'Blank':!k?'No key':a===k?'Correct':'Wrong';
+  const color=flag?'#fff1dc':!a?'#f5f5f5':!k?'#eee':a===k?'#e9f8ed':'#fdecec';
+  return `<tr style="background:${color}">
+   <td style="padding:6px;border-bottom:1px solid #ddd">${i+1}</td>
+   <td style="padding:6px;border-bottom:1px solid #ddd">${a||'—'}</td>
+   <td style="padding:6px;border-bottom:1px solid #ddd">${k||'—'}</td>
+   <td style="padding:6px;border-bottom:1px solid #ddd">${state}</td>
+   <td style="padding:4px;border-bottom:1px solid #ddd">
+    <select aria-label="Correct marked answer for question ${i+1}" onchange="setAnswer(${i},this.value)" style="${IN};padding:5px;width:80px">
+     <option value="" ${!a?'selected':''}>Blank</option>
+     ${['A','B','C','D'].map(x=>`<option value="${x}" ${a===x?'selected':''}>${x}</option>`).join('')}
+    </select>
+   </td>
+  </tr>`;
+ }).join('');
+ $('review').innerHTML=`<details>
+  <summary style="cursor:pointer;font-weight:700;margin-bottom:8px">Answer review · 100 questions</summary>
+  <div style="overflow-x:auto">
+   <table style="width:100%;border-collapse:collapse;text-align:left;font-size:14px">
+    <thead><tr style="background:#eee">
+     <th style="padding:7px">Q</th><th style="padding:7px">Marked</th><th style="padding:7px">Key</th><th style="padding:7px">Result</th><th style="padding:7px">Fix</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+   </table>
+  </div>
+ </details>`;
+}
+
+function showFlags(){ $('flags').innerHTML=scan.flags.filter(f=>!f.done).map(f=>`<div style="background:#fff;padding:8px;margin:4px 0;border-radius:8px;border:1px solid #f80">Q${f.q+1} · ${f.why} · ${f.fr}<br>${['A','B','C','D','blank'].map((l,i)=>`<button onclick="fix(${f.q},${i})" style="${BS};padding:6px 10px">${l}</button>`).join('')}</div>`).join(''); }
+
+function setAnswer(q,value){
+ if(!scan)return;
+ scan.ans[q]=value||null;
+ const flag=scan.flags.find(f=>f.q===q);
+ if(flag)flag.done=true;
+ showFlags();
+ show();
+}
+function fix(q,i){ setAnswer(q,i<4?'ABCD'[i]:null); }
 function btns(){ $('useKey').style.display=scan&&mode==='key'?'':'none'; }
 function renderRes(){ $('res').innerHTML=results.map((r,i)=>`<div style="background:#f5f5f5;padding:8px;margin:4px 0;border-radius:8px;display:flex;justify-content:space-between"><span>${i+1}. ${r.n}</span><span>✔${r.c} ✘${r.w} · <b>${r.s}</b>${r.f?' ⚠'+r.f:''}</span></div>`).join(''); }
 
 $('kf').onchange=e=>{ const f=e.target.files[0]; e.target.value=''; load(f,'key'); };
 $('cf').onchange=e=>{ const f=e.target.files[0]; e.target.value=''; load(f,'cand'); };
-$('rs').onclick=()=>{ if(!base)return; pts=[]; scan=null; redraw(); $('flags').innerHTML=''; $('sum').innerHTML=''; btns(); msg('Tap centre of '+LBL[0]); };
+$('rs').onclick=()=>{ if(!base)return; pts=[]; scan=null; redraw(); $('flags').innerHTML=''; $('review').innerHTML=''; $('sum').innerHTML=''; btns(); msg('Tap centre of '+LBL[0]); };
 $('key').oninput=()=>{ key=parseKey($('key').value); kinfo(); };
-$('useKey').onclick=()=>{ key=scan.ans.slice(); $('key').value=key.map(a=>a||'-').join(''); scan=null; btns(); kinfo(); };
+$('mc').oninput=()=>{ if(scan){show();showFlags();} };
+$('mn').oninput=()=>{ if(scan){show();showFlags();} };
+$('useKey').onclick=()=>{ key=scan.ans.slice(); $('key').value=key.map(a=>a||'-').join(''); scan=null; btns(); $('flags').innerHTML=''; $('review').innerHTML=''; kinfo(); };
 </script>
 </body>
 </html>

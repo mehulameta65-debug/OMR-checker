@@ -40,19 +40,18 @@ $('app').innerHTML=`
 
 <div id="s2" style="${CARD};opacity:.45">
  <div style="font-weight:700;margin-bottom:8px">Step 2 · Candidate response sheet</div>
- <input id="nm" placeholder="Candidate name / roll" style="${IN};width:100%">
+ <input id="nm" placeholder="Candidate name / roll (optional)" style="${IN};width:100%">
  <label style="${BP};display:inline-block;margin-top:6px">Upload candidate OMR photo<input id="cf" type="file" accept="image/*" style="display:none"></label>
  <button id="rs" style="${BS};background:#777">Reset taps</button>
  <p id="msg" style="margin:6px 0;font-weight:600">Upload the answer PDF first.</p>
+ <div id="sum" style="margin:6px 0"></div>
  <canvas id="cv" style="width:100%;touch-action:manipulation;background:#ddd;border-radius:8px"></canvas>
- <p id="sum"></p><div id="flags"></div>
- <button id="save" style="${BS};display:none">Save candidate</button>
+ <div id="flags"></div>
  <button id="useKey" style="${BS};display:none">Use as answer key</button>
 </div>
 
 <div style="${CARD}">
- <div style="font-weight:700">Results</div><div id="res"></div>
- <button id="csv" style="${BS}">Download CSV</button>
+ <div style="font-weight:700">All candidates (this session)</div><div id="res"></div>
 </div>`;
 
 const cv=$('cv'), cx=cv.getContext('2d',{willReadFrequently:true});
@@ -129,17 +128,24 @@ function run(){
   for(let o=0;o<4;o++){ const hit=a==='ABCD'[o];
    dot(f(COLS[b][o],v), fg&&fr[o]>=FAINT?'#f80':hit?'#0b0':'#aaa', hit||(fg&&fr[o]>=FAINT)?rad:3); }
  }
- scan={ans,flags}; btns(); show(); showFlags();
- msg(mode==='key'?'Fix any flags, then tap "Use as answer key".':'Scanned. Green rings should sit on filled bubbles.'); }
+ scan={ans,flags,n:$('nm').value||('Candidate '+(results.length+1))};
+ if(mode==='cand'){ scan.idx=results.push({n:scan.n,...sum()})-1; $('nm').value=''; }   // auto-add to list
+ btns(); show(); showFlags();
+ msg(mode==='key'?'Fix any flags, then tap "Use as answer key".':'Done. Green rings should sit on filled bubbles.');
+ $('sum').scrollIntoView({behavior:'smooth',block:'center'}); }
 
 function sum(){ const mc=+$('mc').value, mn=+$('mn').value; let c=0,w=0,u=0;
  scan.ans.forEach((a,i)=>{ if(!a)u++; else if(key[i]) a===key[i]?c++:w++; });   // blank = no marks
  return {c,w,u,s:+(c*mc-w*mn).toFixed(2),f:scan.flags.filter(x=>!x.done).length}; }
-function show(){ const s=sum();
- $('sum').innerHTML=`Attempted ${100-s.u} · ✔ ${s.c} · ✘ ${s.w} · Score <b>${s.s}</b> · Flags left ${s.f}`; }
+function show(){ const s=sum(), tot=100*(+$('mc').value);
+ $('sum').innerHTML=mode==='key'?`Attempted ${100-s.u}`:
+  `<div style="font-size:13px;color:#555">${scan.n}</div>
+   <div><span style="font-size:36px;font-weight:800;color:#0a7">${s.s}</span> <span style="font-size:16px">/ ${tot}</span></div>
+   <div>✔ ${s.c} correct · ✘ ${s.w} wrong · ${100-s.u} attempted · ${s.u} skipped${s.f?` · ⚠ ${s.f} to review below`:''}</div>`;
+ if(scan.idx!==undefined){ Object.assign(results[scan.idx],s); renderRes(); } }
 function showFlags(){ $('flags').innerHTML=scan.flags.map(f=>`<div style="background:#fff;padding:8px;margin:4px 0;border-radius:8px;border:1px solid ${f.done?'#7c7':'#f80'}">Q${f.q+1} · ${f.why} · ${f.fr}<br>${['A','B','C','D','blank'].map((l,i)=>`<button onclick="fix(${f.q},${i})" style="${BS};padding:6px 10px">${l}</button>`).join('')}</div>`).join(''); }
 function fix(q,i){ scan.ans[q]=i<4?'ABCD'[i]:null; scan.flags.find(f=>f.q===q).done=true; showFlags(); show(); }
-function btns(){ $('save').style.display=scan&&mode==='cand'?'':'none'; $('useKey').style.display=scan&&mode==='key'?'':'none'; }
+function btns(){ $('useKey').style.display=scan&&mode==='key'?'':'none'; }
 function renderRes(){ $('res').innerHTML=results.map((r,i)=>`<div style="background:#f5f5f5;padding:8px;margin:4px 0;border-radius:8px;display:flex;justify-content:space-between"><span>${i+1}. ${r.n}</span><span>✔${r.c} ✘${r.w} · <b>${r.s}</b>${r.f?' ⚠'+r.f:''}</span></div>`).join(''); }
 
 $('kf').onchange=e=>{ const f=e.target.files[0]; e.target.value=''; load(f,'key'); };
@@ -147,11 +153,6 @@ $('cf').onchange=e=>{ const f=e.target.files[0]; e.target.value=''; load(f,'cand
 $('rs').onclick=()=>{ if(!base)return; pts=[]; scan=null; redraw(); $('flags').innerHTML=''; $('sum').innerHTML=''; btns(); msg('Tap centre of '+LBL[0]); };
 $('key').oninput=()=>{ key=parseKey($('key').value); kinfo(); };
 $('useKey').onclick=()=>{ key=scan.ans.slice(); $('key').value=key.map(a=>a||'-').join(''); scan=null; btns(); kinfo(); };
-$('save').onclick=()=>{ const s=sum(); results.push({n:$('nm').value||('Candidate '+(results.length+1)),...s});
- $('nm').value=''; renderRes(); scan=null; base=null; $('flags').innerHTML=''; $('sum').innerHTML=''; cx.clearRect(0,0,cv.width,cv.height); btns(); msg('Saved. Upload the next candidate sheet.'); };
-$('csv').onclick=()=>{ const rows=[['Name','Correct','Wrong','Unattempted','Score','Unresolved flags'],...results.map(r=>[r.n,r.c,r.w,r.u,r.s,r.f])];
- const t=rows.map(r=>r.map(x=>'"'+String(x).replace(/"/g,'""')+'"').join(',')).join('\n');
- const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([t],{type:'text/csv'})); a.download='results.csv'; a.click(); };
 </script>
 </body>
 </html>
